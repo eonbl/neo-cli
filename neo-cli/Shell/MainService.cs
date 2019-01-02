@@ -94,6 +94,8 @@ namespace Neo.Shell
                     return OnInstallCommand(args);
                 case "uninstall":
                     return OnUnInstallCommand(args);
+                case "vote":
+                    return OnVoteCommand(args);
                 default:
                     return base.OnCommand(args);
             }
@@ -420,6 +422,7 @@ namespace Neo.Shell
                 "\tshow state\n" +
                 "\tshow pool [verbose]\n" +
                 "\trelay <jsonObjectToSign>\n" +
+                "\tvote <address> <list of public keys>\n" +
                 "Plugin Commands:\n" +
                 "\tplugins\n" +
                 "\tinstall <pluginName>\n" +
@@ -1023,6 +1026,56 @@ namespace Neo.Shell
             string path_new = Path.ChangeExtension(path, ".json");
             NEP6Wallet.Migrate(GetIndexer(), path_new, path, password).Save();
             Console.WriteLine($"Wallet file upgrade complete. New wallet file has been auto-saved at: {path_new}");
+            return true;
+        }
+
+        private bool OnVoteCommand(string[] args)
+        {
+            if (args.Length < 3) return false;
+            if (NoWallet()) return true;
+            UInt160 scriptHash = args[1].ToScriptHash();
+            Transaction tx = Program.Wallet.MakeTransaction(new StateTransaction
+            {
+                Version = 0,
+                Descriptors = new[]
+                {
+                    new StateDescriptor
+                    {
+                        Type = StateType.Account,
+                        Key = scriptHash.ToArray(),
+                        Field = "Votes",
+                        Value = new List<string>(args).GetRange(2, args.Length - 2).Select(p => ECPoint.Parse(p, ECCurve.Secp256r1)).ToArray().ToByteArray()
+                    }
+                }
+            });
+            if (tx == null)
+            {
+                Console.WriteLine("Insufficient funds");
+                return true;
+            }
+            ContractParametersContext context;
+            try
+            {
+                context = new ContractParametersContext(tx);
+            }
+            catch (InvalidOperationException)
+            {
+                Console.WriteLine("Invalid Operation attempted. Unsynchronized Block");
+                return true;
+            }
+            Program.Wallet.Sign(context);
+            if (context.Completed)
+            {
+                tx.Witnesses = context.GetWitnesses();
+                Program.Wallet.ApplyTransaction(tx);
+                system.LocalNode.Tell(new LocalNode.Relay { Inventory = tx });
+                Console.WriteLine($"Transaction successful\nTXID: {tx.Hash}");
+            }
+            else
+            {
+                Console.WriteLine("Incompleted signature\nSignatureContext:");
+                Console.WriteLine(context.ToString());
+            }
             return true;
         }
 
