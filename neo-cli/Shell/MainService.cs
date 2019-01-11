@@ -1034,49 +1034,8 @@ namespace Neo.Shell
             if (args.Length < 3) return false;
             if (NoWallet()) return true;
             UInt160 scriptHash = args[1].ToScriptHash();
-            Transaction tx = Program.Wallet.MakeTransaction(new StateTransaction
-            {
-                Version = 0,
-                Descriptors = new[]
-                {
-                    new StateDescriptor
-                    {
-                        Type = StateType.Account,
-                        Key = scriptHash.ToArray(),
-                        Field = "Votes",
-                        Value = new List<string>(args).GetRange(2, args.Length - 2).Select(p => ECPoint.Parse(p, ECCurve.Secp256r1)).ToArray().ToByteArray()
-                    }
-                }
-            });
-            if (tx == null)
-            {
-                Console.WriteLine("Insufficient funds");
-                return true;
-            }
-            ContractParametersContext context;
-            try
-            {
-                context = new ContractParametersContext(tx);
-            }
-            catch (InvalidOperationException)
-            {
-                Console.WriteLine("Invalid Operation attempted. Unsynchronized Block");
-                return true;
-            }
-            Program.Wallet.Sign(context);
-            if (context.Completed)
-            {
-                tx.Witnesses = context.GetWitnesses();
-                Program.Wallet.ApplyTransaction(tx);
-                system.LocalNode.Tell(new LocalNode.Relay { Inventory = tx });
-                Console.WriteLine($"Transaction successful\nTXID: {tx.Hash}");
-            }
-            else
-            {
-                Console.WriteLine("Incompleted signature\nSignatureContext:");
-                Console.WriteLine(context.ToString());
-            }
-            return true;
+            byte[] candidates = new List<string>(args).GetRange(2, args.Length - 2).Select(p => ECPoint.Parse(p, ECCurve.Secp256r1)).ToArray().ToByteArray();
+            return Program.Wallet.Vote(system, scriptHash, candidates);
         }
 
         private static Wallet OpenWallet(WalletIndexer indexer, string path, string password)
